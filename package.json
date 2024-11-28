@@ -2,13 +2,13 @@
     "name": "frost_o1js",
     "version": "1.0.0",
     "dependencies": {
-      "zkapp-cli": "^0.22.0"
+        "o1js": "^2.1.0",
+        "zkapp-cli": "^0.22.0"
     },
     "devDependencies": {
-      "prettier": "^3.3.3"
+        "prettier": "^3.4.1"
     },
     "scripts": {
-      "format": "prettier --write '**/*.ts'"
+        "format": "prettier --write '**/*.ts'"
     }
-  }
-  
+}
