@@ -67,3 +67,8 @@ function generateDKGChallenge(
     };
   }
 }
+
+
+function keyGenBegin() : any {};
+function keygenReceiveCommitmentsAndValidatePeers() : any {};
+function keygenFinalize(): any {};
