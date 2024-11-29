@@ -12,16 +12,94 @@ type Result<T> =
 
 class Bytes106 extends Bytes(106) {}
 
-class SharesCommitment {}
-class Share {}
+class Share {
+  generatorIndex: Field;
+  receiverIndex: Field;
+  value: Scalar;
+
+  constructor() {
+    this.generatorIndex = Field(0);
+    this.receiverIndex = Field(0);
+    this.value = Scalar.from(0);
+  }
+}
+
+class SharesCommitment {
+  commitment: Group[];
+
+  constructor() {
+    this.commitment = [];
+  }
+}
+interface GenerateSharesResult {
+  sharesCommitment: SharesCommitment;
+  shares: Share[];
+}
 
 function generateShares(
   secret: Scalar,
   numShares: Field,
   threshold: Field,
-  generator_index: Field
-): any {
-  console.log('TODO');
+  generatorIndex: Field
+): Result<GenerateSharesResult> {
+  try {
+    // Validate inputs
+    if (threshold.lessThan(1)) {
+      return { err: 'Threshold cannot be 0' };
+    }
+    if (numShares.lessThan(1)) {
+      return { err: 'Number of shares cannot be 0' };
+    }
+    if (threshold.greaterThan(numShares)) {
+      return { err: 'Threshold cannot exceed numshares' };
+    }
+
+    const numCoeffs = threshold.sub(1);
+
+    const coefficients: Scalar[] = [];
+    for (let i = 0; i < numCoeffs.toBigInt(); i++) {
+      coefficients.push(Scalar.random());
+    }
+
+    const commitment: Group[] = [];
+    commitment.push(Group.generator.scale(secret)); 
+
+    for (const coeff of coefficients) {
+      commitment.push(Group.generator.scale(coeff));
+    }
+
+    const shares: Share[] = [];
+    for (let i = 1; i <= numShares.toBigInt(); i++) {
+      let scalarIndex = Scalar.from(i);
+      let value = Scalar.from(0); 
+
+      for (let j = numCoeffs.toBigInt() - 1n; j >= 0; j--) {
+        value = value.add(coefficients[Number(j)]);
+        value = value.mul(scalarIndex);
+      }
+
+      value = value.add(secret);
+
+      const share = new Share();
+      share.generatorIndex = generatorIndex;
+      share.receiverIndex = Field.from(i);
+      share.value = value;
+      shares.push(share);
+    }
+    const sharesCommitment = new SharesCommitment();
+    sharesCommitment.commitment = commitment;
+
+    return {
+      ok: {
+        sharesCommitment,
+        shares,
+      },
+    };
+  } catch (error) {
+    return {
+      err: `Error generating shares: ${error instanceof Error ? error.message : 'unknown error'}`,
+    };
+  }
 }
 
 function verify_share(
@@ -68,7 +146,6 @@ function generateDKGChallenge(
   }
 }
 
-
-function keyGenBegin() : any {};
-function keygenReceiveCommitmentsAndValidatePeers() : any {};
-function keygenFinalize(): any {};
+function keyGenBegin(): any {}
+function keygenReceiveCommitmentsAndValidatePeers(): any {}
+function keygenFinalize(): any {}
