@@ -31,6 +31,13 @@ class SharesCommitment {
     this.commitment = [];
   }
 }
+
+class KeyPair{
+  index: Field;
+  secret: Scalar;
+  public: Group;
+  group_public: Group;
+}
 interface GenerateSharesResult {
   sharesCommitment: SharesCommitment;
   shares: Share[];
@@ -103,11 +110,33 @@ function generateShares(
 }
 
 function verify_share(
-  threshold: Group,
-  share: Share,
+  threshold: Field,
+  share: Share, 
   commitment: SharesCommitment
-): any {
-  console.log('TODO');
+): Result<void> {
+  try {
+    // Calculate f(x) = g^share
+    const f_result = Group.generator.scale(share.value);
+    const term = Scalar.from(share.receiverIndex.toBigInt());
+    let result = new Group({ x: Field(0), y: Field(1) })
+    if (BigInt(commitment.commitment.length) !== threshold.toBigInt()) {
+      return { err: "Commitment is invalid." };
+    }
+    for (let i = commitment.commitment.length - 1; i >= 0; i--) {
+      result = result.add(commitment.commitment[i]);
+      if (i !== 0) {
+        result = result.scale(term);
+      }
+    }
+    if (!f_result.equals(result)) {
+      return { err: "Share is invalid." };
+    }
+    return { ok: undefined };
+  } catch (error) {
+    return {
+      err: `Error verifying share: ${error instanceof Error ? error.message : 'unknown error'}`
+    };
+  }
 }
 
 function isValidZKP(): any {}
@@ -130,12 +159,14 @@ function generateDKGChallenge(
 
     const indexHex = index.toBigInt().toString(16);
     const contextHex = Buffer.from(context).toString('hex');
+    // Combine for Challenge Creation 
     const combinedHex =
       commitmentHex.padStart(64, '0') +
       publicKeyHex.padStart(64, '0') +
       indexHex.padStart(20, '0') +
       contextHex.padStart(64, '0');
     const bytes = Bytes106.fromHex(combinedHex);
+    // SHA-256 in o1js
     const shaHash = Hash.SHA3_256.hash(bytes);
     const scalar = Scalar.fromFields(shaHash.toFields());
     return { ok: scalar };
