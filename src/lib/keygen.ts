@@ -38,6 +38,33 @@ class KeyPair{
   public: Group;
   group_public: Group;
 }
+
+class KeyGenSignature{
+  r: Group;
+  z: Scalar;
+
+  constructor(){
+    this.r = Group.generator;
+    this.z = Scalar.from(0);
+  }
+}
+
+class KeyGenDKGProposedCommitment {
+  index: Field;
+  sharesCommitment: SharesCommitment;
+  zkp: KeyGenSignature;
+
+  constructor() {
+    this.index = Field(0);
+    this.sharesCommitment = new SharesCommitment();
+    this.zkp = new KeyGenSignature();
+  }
+
+  getCommitmentToSecret(): Group {
+    return this.sharesCommitment.commitment[0];
+  }
+}
+
 interface GenerateSharesResult {
   sharesCommitment: SharesCommitment;
   shares: Share[];
@@ -139,7 +166,26 @@ function verify_share(
   }
 }
 
-function isValidZKP(): any {}
+function isValidZKP(
+  challenge: Scalar,
+  comm: KeyGenDKGProposedCommitment
+): Result<void> {
+  try {
+    const basePointScaled = Group.generator.scale(comm.zkp.z);
+    const commitmentScaled = comm.getCommitmentToSecret().scale(challenge);
+    const difference = basePointScaled.sub(commitmentScaled);
+
+    if (!comm.zkp.r.equals(difference)) {
+      return { err: 'Signature is invalid' };
+    }
+
+    return { ok: undefined };
+  } catch (error) {
+    return {
+      err: `Error validating ZKP: ${error instanceof Error ? error.message : 'unknown error'}`
+    };
+  }
+}
 
 function generateDKGChallenge(
   index: Field,
