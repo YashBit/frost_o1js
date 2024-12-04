@@ -32,18 +32,18 @@ class SharesCommitment {
   }
 }
 
-class KeyPair{
+class KeyPair {
   index: Field;
   secret: Scalar;
   public: Group;
   group_public: Group;
 }
 
-class KeyGenSignature{
+class KeyGenSignature {
   r: Group;
   z: Scalar;
 
-  constructor(){
+  constructor() {
     this.r = Group.generator;
     this.z = Scalar.from(0);
   }
@@ -96,7 +96,7 @@ function generateShares(
     }
 
     const commitment: Group[] = [];
-    commitment.push(Group.generator.scale(secret)); 
+    commitment.push(Group.generator.scale(secret));
 
     for (const coeff of coefficients) {
       commitment.push(Group.generator.scale(coeff));
@@ -105,7 +105,7 @@ function generateShares(
     const shares: Share[] = [];
     for (let i = 1; i <= numShares.toBigInt(); i++) {
       let scalarIndex = Scalar.from(i);
-      let value = Scalar.from(0); 
+      let value = Scalar.from(0);
 
       for (let j = numCoeffs.toBigInt() - 1n; j >= 0; j--) {
         value = value.add(coefficients[Number(j)]);
@@ -138,16 +138,16 @@ function generateShares(
 
 function verify_share(
   threshold: Field,
-  share: Share, 
+  share: Share,
   commitment: SharesCommitment
 ): Result<void> {
   try {
     // Calculate f(x) = g^share
     const f_result = Group.generator.scale(share.value);
     const term = Scalar.from(share.receiverIndex.toBigInt());
-    let result = new Group({ x: Field(0), y: Field(1) })
+    let result = new Group({ x: Field(0), y: Field(1) });
     if (BigInt(commitment.commitment.length) !== threshold.toBigInt()) {
-      return { err: "Commitment is invalid." };
+      return { err: 'Commitment is invalid.' };
     }
     for (let i = commitment.commitment.length - 1; i >= 0; i--) {
       result = result.add(commitment.commitment[i]);
@@ -156,12 +156,12 @@ function verify_share(
       }
     }
     if (!f_result.equals(result)) {
-      return { err: "Share is invalid." };
+      return { err: 'Share is invalid.' };
     }
     return { ok: undefined };
   } catch (error) {
     return {
-      err: `Error verifying share: ${error instanceof Error ? error.message : 'unknown error'}`
+      err: `Error verifying share: ${error instanceof Error ? error.message : 'unknown error'}`,
     };
   }
 }
@@ -182,7 +182,7 @@ function isValidZKP(
     return { ok: undefined };
   } catch (error) {
     return {
-      err: `Error validating ZKP: ${error instanceof Error ? error.message : 'unknown error'}`
+      err: `Error validating ZKP: ${error instanceof Error ? error.message : 'unknown error'}`,
     };
   }
 }
@@ -205,7 +205,7 @@ function generateDKGChallenge(
 
     const indexHex = index.toBigInt().toString(16);
     const contextHex = Buffer.from(context).toString('hex');
-    // Combine for Challenge Creation 
+    // Combine for Challenge Creation
     const combinedHex =
       commitmentHex.padStart(64, '0') +
       publicKeyHex.padStart(64, '0') +
@@ -223,6 +223,184 @@ function generateDKGChallenge(
   }
 }
 
-function keyGenBegin(): any {}
-function keygenReceiveCommitmentsAndValidatePeers(): any {}
-function keygenFinalize(): any {}
+class KeyGenDKGCommitment {
+  index: Field;
+  sharesCommitment: SharesCommitment;
+
+  constructor() {
+    this.index = Field(0);
+    this.sharesCommitment = new SharesCommitment();
+  }
+}
+
+interface KeyGenBeginResult {
+  commitment: KeyGenDKGProposedCommitment;
+  shares: Share[];
+}
+
+interface KeyGenValidateResult {
+  invalidPeerIds: Field[];
+  validCommitments: KeyGenDKGCommitment[];
+}
+
+function keyGenBegin(
+  numshares: Field,
+  threshold: Field,
+  generatorIndex: Field,
+  context: string
+): Result<KeyGenBeginResult> {
+  try {
+    // Generate random secret
+    const secret = Scalar.random();
+
+    // Generate shares for the secret
+    const sharesResult = generateShares(
+      secret,
+      numshares,
+      threshold,
+      generatorIndex
+    );
+    if (sharesResult.err) return { err: sharesResult.err };
+
+    // Ensure shares were generated successfully
+    if (!sharesResult.ok) {
+      return { err: 'Share generation failed' };
+    }
+
+    // Generate random nonce for ZKP
+    const r = Scalar.random();
+    const rPub = Group.generator.scale(r);
+    const sPub = Group.generator.scale(secret);
+
+    // Generate challenge for ZKP
+    const challengeResult = generateDKGChallenge(
+      generatorIndex,
+      context,
+      sPub,
+      rPub
+    );
+    if (challengeResult.err) return { err: challengeResult.err };
+
+    const challenge = challengeResult.ok;
+    if (!challenge) {
+      return { err: 'Challenge generation failed' };
+    }
+
+    // Calculate ZKP with guaranteed Scalar type
+    const z = r.add(secret.mul(challenge));
+
+    // Create commitment using verified shares result
+    const dkgCommitment = new KeyGenDKGProposedCommitment();
+    dkgCommitment.index = generatorIndex;
+    dkgCommitment.sharesCommitment = sharesResult.ok.sharesCommitment;
+    dkgCommitment.zkp = { r: rPub, z };
+
+    return {
+      ok: {
+        commitment: dkgCommitment,
+        shares: sharesResult.ok.shares,
+      },
+    };
+  } catch (error) {
+    return {
+      err: `Error in keyGenBegin: ${error instanceof Error ? error.message : 'unknown error'}`,
+    };
+  }
+}
+
+function keygenReceiveCommitmentsAndValidatePeers(
+  peerCommitments: KeyGenDKGProposedCommitment[],
+  context: string
+): Result<KeyGenValidateResult> {
+  try {
+    const invalidPeerIds: Field[] = [];
+    const validCommitments: KeyGenDKGCommitment[] = [];
+
+    for (const commitment of peerCommitments) {
+      // Generate challenge for verification
+      const challengeResult = generateDKGChallenge(
+        commitment.index,
+        context,
+        commitment.getCommitmentToSecret(),
+        commitment.zkp.r
+      );
+
+      if (challengeResult.err) return { err: challengeResult.err };
+      const challenge = challengeResult.ok;
+      if (!challenge) {
+        return { err: 'Challenge generation failed' };
+      }
+      const zkpResult = isValidZKP(challenge, commitment);
+
+      if (zkpResult.err) {
+        invalidPeerIds.push(commitment.index);
+      } else {
+        const validCommitment = new KeyGenDKGCommitment();
+        validCommitment.index = commitment.index;
+        validCommitment.sharesCommitment = commitment.sharesCommitment;
+        validCommitments.push(validCommitment);
+      }
+    }
+
+    return {
+      ok: {
+        invalidPeerIds,
+        validCommitments,
+      },
+    };
+  } catch (error) {
+    return {
+      err: `Error in keygenReceiveCommitmentsAndValidatePeers: ${
+        error instanceof Error ? error.message : 'unknown error'
+      }`,
+    };
+  }
+}
+
+function keygenFinalize(
+  index: Field,
+  threshold: Field,
+  shares: Share[],
+  commitments: KeyGenDKGCommitment[]
+): Result<KeyPair> {
+  try {
+    for (const share of shares) {
+      const matchingCommitment = commitments.find(
+        (comm) => comm.index.toString() === share.generatorIndex.toString()
+      );
+
+      if (!matchingCommitment) {
+        return { err: 'Received share with no corresponding commitment' };
+      }
+
+      const verifyResult = verify_share(
+        threshold,
+        share,
+        matchingCommitment.sharesCommitment
+      );
+      if (verifyResult.err) return { err: verifyResult.err };
+    }
+    let secret = Scalar.from(0);
+    for (const share of shares) {
+      secret = secret.add(share.value);
+    }
+    const public_key = Group.generator.scale(secret);
+    let group_public = new Group({ x: Field(0), y: Field(1) }); // Identity point
+    for (const comm of commitments) {
+      group_public = group_public.add(comm.sharesCommitment.commitment[0]);
+    }
+
+    return {
+      ok: {
+        index,
+        secret,
+        public: public_key,
+        group_public,
+      },
+    };
+  } catch (error) {
+    return {
+      err: `Error in keygenFinalize: ${error instanceof Error ? error.message : 'unknown error'}`,
+    };
+  }
+}
